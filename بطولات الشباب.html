@@ -120,6 +120,8 @@ tr.first .pos{background:var(--orange);color:#000}
 
 .admin-only{display:none!important}
 body.admin .admin-only{display:inline-block!important}
+body.admin .start-ko.admin-only{display:none!important}
+body.admin .start-ko.admin-only.show{display:block!important}
 .mode{font-size:12px;padding:4px 12px;border-radius:999px;background:#ffffff14;font-weight:700}
 input:disabled{opacity:1;color:#fff;-webkit-text-fill-color:#fff;cursor:default}
 body:not(.admin) .edit-hint{display:none}
@@ -141,6 +143,21 @@ body:not(.admin) .edit-hint{display:none}
 .ctr b{min-width:22px;display:inline-block;font-size:16px}
 .ctr b.top{color:var(--orange)}
 td.team-c{color:var(--muted);font-size:13px}
+
+/* ===== الأدوار الإقصائية ===== */
+#ko{display:none}
+#ko.show{display:block}
+.ko-stage{margin-bottom:14px}
+.ko-title{font-weight:900;font-size:17px;margin:6px 0 10px;display:flex;align-items:center;gap:8px}
+.ko-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:700px){.ko-grid{grid-template-columns:1fr}}
+.match.final{border:2px solid var(--orange);background:linear-gradient(120deg,#2a1a08,#1b2338)}
+.seed{font-size:11px;color:var(--muted);font-weight:600}
+.start-ko{display:none;text-align:center;padding:18px;border:2px dashed var(--orange);border-radius:16px;margin-bottom:20px}
+.start-ko.show{display:block}
+.start-ko p{color:var(--muted);margin-bottom:10px}
+.btn.go{background:linear-gradient(90deg,#ff8a1f,#ff5c1f);border:none;font-size:17px;padding:12px 26px}
+.wait{color:var(--muted);text-align:center;padding:10px;font-size:14px}
 </style>
 </head>
 <body>
@@ -196,6 +213,31 @@ td.team-c{color:var(--muted);font-size:13px}
 
     <div id="champ" class="champ"></div>
 
+    <!-- زر بدء نص النهائي (للمديرة بس، بعد ما يخلص الدوري) -->
+    <div id="startSF" class="start-ko admin-only">
+      <p>✅ خلص دور المجموعة! أول 4 فرق يتأهلون لنص النهائي (الأول × الرابع، والثاني × الثالث)</p>
+      <button class="btn go" onclick="startSF()">🔥 ابدأ نص النهائي</button>
+    </div>
+
+    <!-- الأدوار الإقصائية -->
+    <div id="ko" class="card">
+      <div class="card-h">⚔️ الأدوار الإقصائية <small class="edit-hint">اكتبي النتيجة</small></div>
+      <div class="card-b">
+        <div class="ko-stage">
+          <div class="ko-title">🥊 نص النهائي</div>
+          <div class="ko-grid" id="sfBox"></div>
+        </div>
+        <div id="startF" class="start-ko admin-only">
+          <p>✅ خلص نص النهائي!</p>
+          <button class="btn go" onclick="startF()">🏆 ابدأ النهائي</button>
+        </div>
+        <div class="ko-stage" id="finalStage" style="display:none">
+          <div class="ko-title">🏆 النهائي</div>
+          <div id="fBox"></div>
+        </div>
+      </div>
+    </div>
+
     <div class="grid">
       <div>
         <div class="card">
@@ -249,7 +291,7 @@ td.team-c{color:var(--muted);font-size:13px}
 <div class="modal" id="modal">
   <div class="modal-box">
     <h3>تصفير كل النتائج؟</h3>
-    <p>أسماء الفرق تبقى، بس كل النتائج واحصائيات اللاعبين تنمسح.</p>
+    <p>أسماء الفرق تبقى، بس كل النتائج (الدوري ونص النهائي والنهائي) واحصائيات اللاعبين تنمسح.</p>
     <div class="actions" style="justify-content:center">
       <button class="btn danger" onclick="resetScores()">نعم صفّر</button>
       <button class="btn" onclick="closeModal()">إلغاء</button>
@@ -273,7 +315,9 @@ let state=defaultState();
 let canEdit=false;      // بس صاحبة الموقع تقدر تعدل
 let ref=null,writing=false,pending=false,timer=null,loadedOnce=false;
 
-function defaultState(){return {name:'بطولة روكت ليق 🏆',teams:[...DEFAULT_TEAMS],scores:Array.from({length:10},()=>['','']),stats:emptyStats()};}
+function defaultState(){return {name:'بطولة روكت ليق 🏆',teams:[...DEFAULT_TEAMS],scores:Array.from({length:10},()=>['','']),stats:emptyStats(),ko:emptyKO()};}
+// seeds = ترتيب أول 4 فرق وقت بدء نص النهائي، sf = نتائج نص النهائي، f = نتيجة النهائي
+function emptyKO(){return {sfOn:false,fOn:false,seeds:[],sf:[['',''],['','']],f:['','']};}
 function emptyStats(){return Array.from({length:5},()=>[0,1].map(()=>({g:0,a:0,s:0,m:0})));}
 // تنظيف البيانات اللي جاية من قاعدة البيانات
 function clean(d){
@@ -281,6 +325,15 @@ function clean(d){
   if(typeof d.name==='string')s.name=d.name.slice(0,80);
   if(Array.isArray(d.teams))s.teams=s.teams.map((t,i)=>typeof d.teams[i]==='string'?d.teams[i].slice(0,60):t);
   if(Array.isArray(d.scores))s.scores=s.scores.map((sc,i)=>Array.isArray(d.scores[i])?[0,1].map(j=>/^\d{0,2}$/.test(String(d.scores[i][j]??''))?String(d.scores[i][j]??''):''):sc);
+  const sc2=v=>/^\d{0,2}$/.test(String(v??''))?String(v??''):'';
+  if(d.ko&&typeof d.ko==='object'){
+    const k=d.ko,o=s.ko;
+    o.sfOn=!!k.sfOn;o.fOn=!!k.fOn&&o.sfOn;
+    if(Array.isArray(k.seeds)&&k.seeds.length===4&&k.seeds.every(x=>Number.isInteger(x)&&x>=0&&x<5)&&new Set(k.seeds).size===4)o.seeds=k.seeds.slice();
+    else{o.sfOn=false;o.fOn=false;}
+    if(Array.isArray(k.sf))o.sf=[0,1].map(m=>Array.isArray(k.sf[m])?[sc2(k.sf[m][0]),sc2(k.sf[m][1])]:['','']);
+    if(Array.isArray(k.f))o.f=[sc2(k.f[0]),sc2(k.f[1])];
+  }
   if(Array.isArray(d.stats))s.stats=s.stats.map((t,i)=>t.map((p,j)=>{const q=d.stats[i]?.[j]||{};const o={};['g','a','s','m'].forEach(k=>o[k]=Math.max(0,Math.min(999,parseInt(q[k])||0)));return o;}));
   return s;
 }
@@ -301,7 +354,7 @@ function applyMode(){
 }
 function renderAll(){
   document.getElementById('tName').value=state.name;
-  renderTeams();renderRounds();renderTable();renderStats();
+  renderTeams();renderRounds();renderTable();renderStats();renderKO();
 }
 async function connect(){
   const t=setTimeout(()=>{if(!loadedOnce)setSync('⚠️ ما قدرت أجيب النتائج');},10000);
@@ -412,16 +465,98 @@ function renderTable(){
       <td style="direction:ltr">${gd>0?'+':''}${gd}</td>
       <td class="pts">${t.pts}</td></tr>`;
   }).join('');
+  renderKO();
+}
+
+/* ===== نص النهائي والنهائي ===== */
+function koWinner(sc){ // يرجع 0 أو 1 للفائز، null إذا ما انتهى أو تعادل
+  if(sc[0]===''||sc[1]==='')return null;
+  const x=+sc[0],y=+sc[1];if(x===y)return 'tie';return x>y?0:1;
+}
+function sfPairs(){const s=state.ko.seeds;return [[s[0],s[3]],[s[1],s[2]]];}
+function sfWinners(){
+  const p=sfPairs();
+  return p.map((pr,m)=>{const w=koWinner(state.ko.sf[m]);return w===0||w===1?pr[w]:null;});
+}
+function startSF(){
+  if(!canEdit)return;
+  const {s,played}=standings();if(played<10)return;
+  state.ko=emptyKO();state.ko.sfOn=true;state.ko.seeds=s.slice(0,4).map(t=>t.i);
+  save();renderKO();
+  setTimeout(()=>document.getElementById('ko').scrollIntoView({behavior:'smooth'}),50);
+}
+function startF(){
+  if(!canEdit)return;
+  if(sfWinners().some(w=>w===null))return;
+  state.ko.fOn=true;save();renderKO();
+}
+function setKO(stage,m,side,el){
+  if(!canEdit)return;
+  el.value=el.value.replace(/[^0-9٠-٩]/g,'').replace(/[٠-٩]/g,d=>'٠١٢٣٤٥٦٧٨٩'.indexOf(d)).slice(0,2);
+  if(stage==='sf')state.ko.sf[m][side]=el.value;else state.ko.f[side]=el.value;
+  save();renderKO();
+  const sel=stage==='sf'?`#sf${m} .score input`:`#fm .score input`;
+  const inp=document.querySelectorAll(sel)[side];
+  if(inp){inp.focus();const l=inp.value.length;inp.setSelectionRange(l,l);}
+}
+function koMatch(id,label,a,b,sc,stage,m,cls,seedA,seedB){
+  const w=koWinner(sc);
+  const dis=canEdit?'':'disabled placeholder="-"';
+  return `<div class="match ${cls} ${w==='tie'?'tie':w!==null?'done':''}" id="${id}">
+    <div class="mnum">${label}</div>
+    <div class="side home ${w===0?'win':''}">${dot(a)}<span>${esc(state.teams[a])}${seedA?`<br><span class="seed">${seedA}</span>`:''}</span></div>
+    <div class="score">
+      <input inputmode="numeric" value="${sc[0]}" ${dis} oninput="setKO('${stage}',${m},0,this)">
+      <span>-</span>
+      <input inputmode="numeric" value="${sc[1]}" ${dis} oninput="setKO('${stage}',${m},1,this)">
+    </div>
+    <div class="side away ${w===1?'win':''}"><span>${esc(state.teams[b])}${seedB?`<br><span class="seed">${seedB}</span>`:''}</span>${dot(b)}</div>
+    ${w==='tie'?'<div class="warn">⚠️ ما في تعادل! كملوا أوفر تايم</div>':''}
+  </div>`;
+}
+function renderKO(){
+  const {played}=standings();
+  const ko=state.ko;
   const c=document.getElementById('champ');
-  if(played===10){c.innerHTML=`🏆 البطل: ${esc(s[0].name)} 🏆`;c.classList.add('show');}
-  else c.classList.remove('show');
+  // زر بدء نص النهائي
+  document.getElementById('startSF').classList.toggle('show',played===10&&!ko.sfOn);
+  document.getElementById('ko').classList.toggle('show',ko.sfOn);
+  c.classList.remove('show');
+  if(!ko.sfOn){
+    if(played===10&&!canEdit){c.innerHTML='✅ خلص دور المجموعة، انتظروا نص النهائي 🔥';c.classList.add('show');}
+    return;
+  }
+  const p=sfPairs();
+  document.getElementById('sfBox').innerHTML=
+    koMatch('sf0','نص النهائي 1',p[0][0],p[0][1],ko.sf[0],'sf',0,'','الأول','الرابع')+
+    koMatch('sf1','نص النهائي 2',p[1][0],p[1][1],ko.sf[1],'sf',1,'','الثاني','الثالث');
+  const sw=sfWinners(),sfDone=sw.every(x=>x!==null);
+  document.getElementById('startF').classList.toggle('show',sfDone&&!ko.fOn);
+  const fs=document.getElementById('finalStage');
+  if(!ko.fOn){
+    fs.style.display=canEdit?'none':'block';
+    if(!canEdit)document.getElementById('fBox').innerHTML='<div class="wait">⏳ النهائي يبدأ بعد نص النهائي</div>';
+    return;
+  }
+  fs.style.display='block';
+  document.getElementById('fBox').innerHTML=koMatch('fm','🏆 النهائي',sw[0],sw[1],ko.f,'f',0,'final','فائز نص النهائي 1','فائز نص النهائي 2');
+  const fw=koWinner(ko.f);
+  if(fw===0||fw===1){c.innerHTML=`🏆 بطل البطولة: ${esc(state.teams[sw[fw]])} 🏆`;c.classList.add('show');}
 }
 
 function buildText(){
   const {s,played}=standings();
   let t=`*${state.name}*\n*الترتيب (${played}/10 ماتش):*\n`;
   s.forEach((x,n)=>{const gd=x.gf-x.ga;t+=`${n+1}. ${x.name} | لعب ${x.p} | فوز ${x.w} | خسارة ${x.l} | فارق ${gd>0?'+':''}${gd} | *${x.pts} نقط*\n`;});
-  if(played===10)t+=`\n🏆 البطل: *${s[0].name}*`;
+  const ko=state.ko;
+  if(ko.sfOn){
+    const p=sfPairs(),line=(a,b,sc)=>`${state.teams[a]} ( ${sc[0]||'?'} - ${sc[1]||'?'} ) ${state.teams[b]}`;
+    t+=`\n*🥊 نص النهائي:*\n1) ${line(p[0][0],p[0][1],ko.sf[0])}\n2) ${line(p[1][0],p[1][1],ko.sf[1])}\n`;
+    if(ko.fOn){
+      const sw=sfWinners();t+=`\n*🏆 النهائي:*\n${line(sw[0],sw[1],ko.f)}\n`;
+      const fw=koWinner(ko.f);if(fw===0||fw===1)t+=`\n🏆 بطل البطولة: *${state.teams[sw[fw]]}*`;
+    }
+  }
   return t;
 }
 async function copyText(){
@@ -436,7 +571,7 @@ async function copyText(){
 function toast(m){const e=document.getElementById('toast');e.textContent=m;e.classList.add('show');setTimeout(()=>e.classList.remove('show'),2200);}
 function openModal(){document.getElementById('modal').classList.add('show');}
 function closeModal(){document.getElementById('modal').classList.remove('show');}
-function resetScores(){if(!canEdit)return;state.scores=Array.from({length:10},()=>['','']);state.stats=emptyStats();save();renderRounds();renderTable();renderStats();closeModal();toast('تم التصفير');}
+function resetScores(){if(!canEdit)return;state.scores=Array.from({length:10},()=>['','']);state.stats=emptyStats();state.ko=emptyKO();save();renderRounds();renderTable();renderStats();closeModal();toast('تم التصفير');}
 
 /* ===== احصائيات اللاعبين ===== */
 const STATS=[{k:'g',t:'⚽ أهداف',lead:'⚽ هداف البطولة'},{k:'a',t:'🅰️ أسيست',lead:'🅰️ ملك الأسيست'},
